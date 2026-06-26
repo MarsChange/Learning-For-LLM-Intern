@@ -44,35 +44,47 @@ import numpy as np
 
 
 def fmt(x: float) -> str:
+    # 输出统一保留 6 位；极小误差当作 0。
     if abs(x) < 5e-7:
         x = 0.0
     return f"{x:.6f}"
 
 
 def cross_entropy(logits, labels):
+    # logits: [n, c]，labels: [n]，每个 label 是正确类别下标。
+    # 先减每行最大值，避免 exp(logits) 溢出。
     z = logits - np.max(logits, axis=1, keepdims=True)
+    # logsumexp = log(sum(exp(z)))，shape [n,1]，每个样本一项。
     logsumexp = np.log(np.sum(np.exp(z), axis=1, keepdims=True))
+    # log_softmax_i = z_i - logsumexp。
     log_probs = z - logsumexp
+    # 取每个样本正确类别的 log probability，再加负号得到 loss。
     return -log_probs[np.arange(len(labels)), labels]
 
 
 def solve():
+    # 输入 n 个样本、c 个类别和 reduction 类型。
     data = sys.stdin.read().strip().split()
     if not data:
         return
 
     n, c, reduction = map(int, data[:3])
     idx = 3
+    # logits 是模型未归一化分数，不需要提前 softmax。
     logits = np.array(list(map(float, data[idx:idx + n * c])), dtype=float).reshape(n, c)
     idx += n * c
+    # labels 是类别下标，不是 one-hot。
     labels = np.array(list(map(int, data[idx:idx + n])), dtype=int)
 
     losses = cross_entropy(logits, labels)
     if reduction == 0:
+        # mean reduction：所有样本 loss 求平均。
         print(fmt(float(np.mean(losses))))
     elif reduction == 1:
+        # sum reduction：所有样本 loss 求和。
         print(fmt(float(np.sum(losses))))
     else:
+        # none reduction：逐样本输出 loss。
         print(" ".join(fmt(v) for v in losses))
 
 

@@ -30,8 +30,8 @@ DPO 训练数据是偏好对：
 记作：
 
 - `x`：prompt。
-- `y_w`：winner/chosen，被偏好的回答。
-- `y_l`：loser/rejected，不被偏好的回答。
+- $y_w$：winner/chosen，被偏好的回答。
+- $y_l$：loser/rejected，不被偏好的回答。
 
 ## 从 RLHF 到 DPO
 

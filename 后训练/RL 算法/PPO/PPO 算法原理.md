@@ -40,15 +40,95 @@ flowchart TD
 | reward model | 冻结 | 给完整回答打偏好分 |
 | value / critic | 训练 | 估计状态价值，降低 policy gradient 方差 |
 
+## Reward Model 和 Critic 从哪里来
+
+面试里很容易把 `reward model` 和 `critic/value model` 混在一起。它们都输出标量，但来源、训练目标和训练阶段不同。
+
+### Reward Model 怎么得到
+
+reward model 通常在 PPO 之前单独训练：
+
+```mermaid
+flowchart TD
+    A["SFT model"] --> B["Sample multiple answers"]
+    B --> C["Human preference labeling"]
+    C --> D["chosen / rejected pairs"]
+    D --> E["Train reward model with ranking loss"]
+    E --> F["Frozen RM used by PPO"]
+```
+
+具体做法：
+
+1. 用 SFT model 对同一个 prompt 生成多个候选回答。
+2. 人类标注或偏好系统比较回答，得到 `chosen > rejected` 偏好对。
+3. 用一个语言模型 backbone 加 scalar reward head，输入 `(prompt, response)`，输出标量 $r_\phi(x,y)$。
+4. 用 Bradley-Terry / pairwise ranking loss 训练：
+
+$$
+\mathcal{L}_{RM}
+=-\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l))
+$$
+
+其中 $y_w$ 是 chosen answer，$y_l$ 是 rejected answer。
+
+训练完成后，reward model 在 PPO 阶段通常冻结，只负责给 policy 采样出的完整回答打分。它不是 PPO 的 critic，也不直接参与 policy 反向传播。
+
+### Critic / Value Model 怎么得到
+
+critic/value model 通常在 PPO 阶段训练出来：
+
+```mermaid
+flowchart TD
+    A["SFT / policy backbone"] --> B["Add value head"]
+    C["Policy rollout"] --> D["RM score + KL penalty"]
+    D --> E["Compute return / advantage"]
+    B --> F["Predict V(s_t)"]
+    E --> G["Value loss"]
+    F --> G
+    G --> H["Update critic"]
+```
+
+常见初始化方式：
+
+- 复用 SFT model 或当前 policy 的 transformer backbone，再加一个 value head。
+- 有些实现让 actor 和 critic 共享部分 backbone，有些实现单独维护 critic 模型。
+- value head 初始并不会天然懂“人类偏好”，它是在 PPO rollout 上用 return 作为监督信号逐步学出来的。
+
+critic 的训练目标是拟合状态价值：
+
+$$
+V_\psi(s_t)\approx R_t
+$$
+
+对应 value loss：
+
+$$
+L^{VF}(\psi)=\left(V_\psi(s_t)-R_t\right)^2
+$$
+
+这里的 $R_t$ 来自 reward model 分数、KL penalty、可能的规则奖励或 reward shaping 组成的累计回报。critic 学的是“当前前缀继续生成，按当前 policy 平均能拿多少回报”，不是“这个回答在人类看来有多好”。
+
+### 一句话区分
+
+| 模型 | 训练数据 | 训练阶段 | PPO 阶段是否更新 | 输出含义 |
+|---|---|---|---|---|
+| reward model | 人类偏好对 `chosen/rejected` | PPO 前 | 通常冻结 | 完整回答的偏好分 |
+| critic / value model | PPO rollout 的 return | PPO 中 | 更新 | 当前状态的期望回报 |
+| reference model | SFT 权重 | PPO 前已有 | 冻结 | KL 约束参照分布 |
+
+面试表达：
+
+> RM 是偏好打分器，来自人类偏好排序；critic 是方差降低器，来自 PPO 过程中对 return 的拟合。RM 告诉模型“这个完整回答好不好”，critic 告诉 PPO“当前 token 前缀的平均基线是多少”。
+
 ## RL 视角下的 LLM
 
 把 LLM 生成看作序列决策：
 
 | RL 概念 | LLM 对应 |
 |---|---|
-| state `s_t` | prompt + 已生成 token 前缀 |
-| action `a_t` | 下一个 token |
-| policy `πθ(a_t|s_t)` | 语言模型输出概率 |
+| state $s_t$ | prompt + 已生成 token 前缀 |
+| action $a_t$ | 下一个 token |
+| policy $\pi_\theta(a_t\mid s_t)$ | 语言模型输出概率 |
 | trajectory | 一整段 response |
 | reward | reward model 分数、规则奖励或人工反馈 |
 | episode end | 生成 EOS 或达到最大长度 |
@@ -69,7 +149,7 @@ $$
 \nabla_\theta J(\theta)=\mathbb{E}_{\tau\sim\pi_\theta}\left[\sum_t \nabla_\theta \log \pi_\theta(a_t|s_t) A_t\right]
 $$
 
-其中 `A_t` 是 advantage，表示当前动作比平均水平好多少：
+其中 $A_t$ 是 advantage，表示当前动作比平均水平好多少：
 
 $$
 A_t = Q(s_t,a_t)-V(s_t)
@@ -126,7 +206,7 @@ $$
 
 其中：
 
-- `L^VF` 是 value function loss，用于训练 critic。
+- $L^{\text{VF}}$ 是 value function loss，用于训练 critic。
 - `S` 是 entropy bonus，鼓励探索，避免策略过早塌缩。
 - `c1/c2` 是权重。
 
@@ -173,22 +253,17 @@ $$
 ## LLM PPO 训练流程
 
 ```mermaid
-sequenceDiagram
-    participant P as Policy
-    participant Ref as Reference
-    participant RM as Reward Model
-    participant V as Value Model
-    participant Opt as PPO Optimizer
-
-    P->>P: sample responses for prompts
-    P->>RM: score full responses
-    P->>Ref: compute KL to reference
-    P->>V: estimate values
-    V->>Opt: advantages via returns/GAE
-    RM->>Opt: rewards
-    Ref->>Opt: KL penalty
-    Opt->>P: clipped policy update
-    Opt->>V: value update
+flowchart TD
+    A["Policy samples responses"] --> B["Reward model scores responses"]
+    A --> C["Reference model computes KL penalty"]
+    A --> D["Value model estimates V(s_t)"]
+    B --> E["Build total reward"]
+    C --> E
+    E --> F["Compute returns and advantages"]
+    D --> F
+    F --> G["PPO clipped objective"]
+    G --> H["Update policy"]
+    G --> I["Update value model"]
 ```
 
 ## 为什么 PPO 工程成本高
@@ -231,7 +306,7 @@ PPO-based RLHF 至少涉及多个模型副本：
 ## 面试高频问题
 
 1. **PPO 的 clip 到底 clip 什么？**  
-   clip 新旧策略对同一动作的概率比 `π_new / π_old`，限制策略更新幅度。
+   clip 新旧策略对同一动作的概率比 $\pi_{\text{new}} / \pi_{\text{old}}$，限制策略更新幅度。
 
 2. **为什么不用普通 policy gradient？**  
    普通 PG 每批数据通常只能安全用一次，更新大时不稳定；PPO 用 clipped objective 允许多 epoch minibatch 更新。

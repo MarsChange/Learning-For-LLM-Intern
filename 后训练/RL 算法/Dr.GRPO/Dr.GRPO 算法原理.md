@@ -7,7 +7,7 @@ Dr.GRPO 通常指 “GRPO Done Right”，来自论文 *Understanding R1-Zero-Li
 面试重点：
 
 - GRPO 为什么会鼓励 response 变长？
-- `1/|o_i|` 长度归一化为什么会带来偏置？
+- $\frac{1}{|o_i|}$ 长度归一化为什么会带来偏置？
 - group std normalization 为什么可能带来难度偏置？
 - Dr.GRPO 改了哪些项？
 - Dr.GRPO 和 DAPO/GSPO 的改进方向有什么不同？
@@ -37,7 +37,7 @@ Dr.GRPO 关注第三点。
 对同一 prompt `q` 采样 `G` 条回答：
 
 $$
-\{o_i\}_{i=1}^{G}\sim\pi_{\theta_{\text{old}}}(\cdot|q)
+\{o_i\}_{i=1}^{G}\sim\pi_{\theta_{\text{old}}}(\cdot\mid q)
 $$
 
 奖励：
@@ -74,7 +74,7 @@ $$
 
 问题直觉：
 
-- 长回答的每个 token 梯度被 `1/|o_i|` 稀释。
+- 长回答的每个 token 梯度被 $\frac{1}{|o_i|}$ 稀释。
 - 短回答的每个 token 梯度更大。
 - 对负 advantage 的错误回答，变长可能降低每个错误 token 受到的惩罚强度。
 - 训练中可能出现错误回答越来越长的现象。
@@ -89,11 +89,11 @@ $$
 \hat{A}_i=\frac{r_i-\mu}{\sigma}
 $$
 
-其中 `σ` 是同组 reward 标准差。
+其中 $\sigma$ 是同组 reward 标准差。
 
 问题：
 
-- 对 reward 方差很小的 group，除以很小的 `σ` 会放大梯度。
+- 对 reward 方差很小的 group，除以很小的 $\sigma$ 会放大梯度。
 - 对 reward 方差大的 group，梯度被缩小。
 - 这相当于根据题目难度/组内分布动态改变学习率。
 
@@ -103,7 +103,7 @@ $$
 
 Dr.GRPO 做两个核心修改：
 
-1. 去掉 response-level 长度归一化 `1/|o_i|`。
+1. 去掉 response-level 长度归一化 $\frac{1}{|o_i|}$。
 2. 去掉 advantage 中的 std normalization，只保留 reward 减均值。
 
 advantage 改为：
@@ -112,7 +112,7 @@ $$
 \hat{A}_i = r_i - \text{mean}(r_1,\ldots,r_G)
 $$
 
-loss 聚合用固定尺度，例如最大生成长度 `L_max`：
+loss 聚合用固定尺度，例如最大生成长度 $L_{\max}$：
 
 $$
 L_{\text{Dr.GRPO}} =
@@ -134,7 +134,7 @@ $$
 
 ## 为什么固定尺度更合理
 
-固定 `L_max` 的含义：
+固定 $L_{\max}$ 的含义：
 
 - loss scale 不随单条回答长度变化。
 - 每个 token 的梯度不会因为本条 response 变长而自动变小。
@@ -153,8 +153,8 @@ flowchart LR
 | 维度 | GRPO | Dr.GRPO |
 |---|---|---|
 | critic | 不需要 | 不需要 |
-| advantage | `(r_i - mean) / std` | `r_i - mean` |
-| loss scale | 常见为每条 response 长度平均 | 固定常数，如 `L_max` |
+| advantage | $(r_i-\mathrm{mean})/\mathrm{std}$ | $r_i-\mathrm{mean}$ |
+| loss scale | 常见为每条 response 长度平均 | 固定常数，如 $L_{\max}$ |
 | 主要问题 | 可能鼓励错误回答变长 | 降低长度/std 偏置 |
 | 适用场景 | 通用 RLVR 起点 | R1-Zero-like 训练、数学推理 |
 
@@ -214,7 +214,7 @@ training step -> accuracy
    去掉 per-response length normalization，去掉 advantage 的 group std normalization。
 
 2. **为什么长度归一化会鼓励错误回答变长？**  
-   因为负 advantage 的长回答每个 token 惩罚被 `1/|o_i|` 稀释，变长可能降低单位 token 惩罚。
+   因为负 advantage 的长回答每个 token 惩罚被 $\frac{1}{|o_i|}$ 稀释，变长可能降低单位 token 惩罚。
 
 3. **为什么 std normalization 可能有偏？**  
    它根据组内 reward 方差缩放梯度，相当于不同题目/组获得不同学习率，可能引入难度偏置。

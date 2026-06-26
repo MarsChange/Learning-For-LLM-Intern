@@ -69,7 +69,7 @@ r_{i,t}(\theta)=
 {\pi_{\theta_{\text{old}}}(o_{i,t}|q,o_{i,<t})}
 $$
 
-`ε_low` 和 `ε_high` 是解耦的上下裁剪边界，通常 `ε_high > ε_low`。
+$\varepsilon_{\text{low}}$ 和 $\varepsilon_{\text{high}}$ 是解耦的上下裁剪边界，通常 $\varepsilon_{\text{high}} > \varepsilon_{\text{low}}$。
 
 ## 四个关键技术
 
@@ -209,7 +209,7 @@ DAPO 的动态采样和非对称 clip 正好围绕这些特点设计。
 |---|---|---|
 | 重采样成本过高 | 训练吞吐下降 | 过滤太难/太易样本，调 group size |
 | 长度惩罚过强 | 模型不愿展开推理 | 提高 safe_length，降低惩罚 |
-| clip high 过大 | KL 飙升，训练不稳 | 降低 `ε_high` 或学习率 |
+| clip high 过大 | KL 飙升，训练不稳 | 降低 $\varepsilon_{\text{high}}$ 或学习率 |
 | 奖励规则漏洞 | 模型学会投机格式 | 改 reward parser，加入人工/单测 |
 | 数据过窄 | 只会特定题型 | 扩充 prompt 分布 |
 
@@ -221,7 +221,7 @@ DAPO 的动态采样和非对称 clip 正好围绕这些特点设计。
 2. **Dynamic Sampling 解决什么？**  
    解决组内全对/全错导致 advantage 无效的问题，提高每个 group 的训练信号密度。
 
-3. **为什么 `ε_high` 要大于 `ε_low`？**  
+3. **为什么 $\varepsilon_{\text{high}}$ 要大于 $\varepsilon_{\text{low}}$？**  
    给正 advantage 样本更大上升空间，避免好样本概率提升过早被 clip，同时仍限制负向更新。
 
 4. **Overlong Reward Shaping 会不会抑制推理？**  

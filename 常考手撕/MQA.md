@@ -34,32 +34,43 @@ import torch
 
 
 def fmt(x):
+    # 统一格式化输出，避免出现 -0.000000。
     if abs(x) < 5e-7:
         x = 0.0
     return f"{x:.6f}"
 
 
 def mqa(x, w_q, w_k, w_v, w_o, num_q_heads, causal):
+    # x: [B, T, D]。MQA 中 Q 有多个 heads，但 K/V 只有 1 个 head。
     bsz, seq_len, d_model = x.shape
     if d_model % num_q_heads != 0:
         raise ValueError("d_model must be divisible by num_q_heads")
 
     head_dim = d_model // num_q_heads
+    # Q 拆成多个 head: [B, H, T, head_dim]。
     q = (x @ w_q).view(bsz, seq_len, num_q_heads, head_dim).transpose(1, 2)
+    # K/V 只有一个 head: [B, 1, T, head_dim]。
+    # 后续 matmul 时会在 head 维自动广播到 H 个 Q heads。
     k = (x @ w_k).view(bsz, seq_len, 1, head_dim).transpose(1, 2)
     v = (x @ w_v).view(bsz, seq_len, 1, head_dim).transpose(1, 2)
 
+    # q: [B,H,T,head_dim], k^T: [B,1,head_dim,T]
+    # 广播后 scores: [B,H,T,T]。
     scores = (q @ k.transpose(-2, -1)) / math.sqrt(head_dim)
     if causal:
+        # causal mask 屏蔽未来 token。
         mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1)
         scores = scores.masked_fill(mask, float("-inf"))
 
+    # 每个 Q head 使用同一份 K/V 计算注意力输出。
     attn = torch.softmax(scores, dim=-1)
     out = (attn @ v).transpose(1, 2).contiguous().view(bsz, seq_len, d_model)
+    # 输出投影把多个 Q head 的结果重新融合。
     return out @ w_o
 
 
 def solve():
+    # 读取输入并恢复各个矩阵。
     data = sys.stdin.read().strip().split()
     if not data:
         return
@@ -70,6 +81,7 @@ def solve():
     idx = 0
 
     def take(cnt):
+        # 从扁平列表中连续取 cnt 个值。
         nonlocal idx
         part = vals[idx:idx + cnt]
         idx += cnt
@@ -78,6 +90,7 @@ def solve():
     dtype = torch.float64
     x = torch.tensor(take(b * t * d), dtype=dtype).view(b, t, d)
     wq = torch.tensor(take(d * d), dtype=dtype).view(d, d)
+    # MQA 的 K/V 投影输出只有 head_dim，不是完整 D。
     wk = torch.tensor(take(d * head_dim), dtype=dtype).view(d, head_dim)
     wv = torch.tensor(take(d * head_dim), dtype=dtype).view(d, head_dim)
     wo = torch.tensor(take(d * d), dtype=dtype).view(d, d)

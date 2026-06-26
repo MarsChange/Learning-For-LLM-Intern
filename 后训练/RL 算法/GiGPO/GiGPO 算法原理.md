@@ -124,7 +124,7 @@ Reward: low
 
 ## 简化目标函数
 
-对动作 `a_{i,t}`，仍使用 PPO-style ratio：
+对动作 $a_{i,t}$，仍使用 PPO-style ratio：
 
 $$
 \rho_{i,t}(\theta)=

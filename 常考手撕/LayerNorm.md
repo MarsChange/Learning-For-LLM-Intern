@@ -43,21 +43,28 @@ import numpy as np
 
 
 def fmt(x: float) -> str:
+    # 输出时消除 -0.000000，便于和标准答案比较。
     if abs(x) < 5e-7:
         x = 0.0
     return f"{x:.6f}"
 
 
 def layer_norm(x, eps, gamma=None, beta=None):
+    # x: [n, d]。LayerNorm 对每个样本自己的 d 个 feature 做统计。
+    # axis=1 表示沿 feature 维度求均值；keepdims=True 方便后续广播。
     mean = np.mean(x, axis=1, keepdims=True)
+    # 方差也是每个样本一组，不跨 batch。
     var = np.mean((x - mean) ** 2, axis=1, keepdims=True)
+    # 标准化：减均值、除以标准差。eps 放在 sqrt 里面避免除零。
     y = (x - mean) / np.sqrt(var + eps)
     if gamma is not None and beta is not None:
+        # gamma/beta: [d]，会广播到 [n,d]，每个 feature 一套仿射参数。
         y = y * gamma + beta
     return y
 
 
 def solve():
+    # 读取 n、d、eps、是否使用 affine 参数。
     data = sys.stdin.read().strip().split()
     if not data:
         return
@@ -68,15 +75,18 @@ def solve():
     affine = int(data[3])
     idx = 4
 
+    # 输入矩阵 X，共 n*d 个数。
     x = np.array(list(map(float, data[idx:idx + n * d])), dtype=float).reshape(n, d)
     idx += n * d
 
     gamma = beta = None
     if affine:
+        # affine=1 时额外读取 gamma 和 beta，长度均为 d。
         gamma = np.array(list(map(float, data[idx:idx + d])), dtype=float)
         idx += d
         beta = np.array(list(map(float, data[idx:idx + d])), dtype=float)
 
+    # 输出每个样本归一化后的 d 维向量。
     y = layer_norm(x, eps, gamma, beta)
     for row in y:
         print(" ".join(fmt(v) for v in row))

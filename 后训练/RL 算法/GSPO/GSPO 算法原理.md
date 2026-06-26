@@ -45,7 +45,7 @@ GSPO 的核心判断：
 对 prompt `x`，旧策略采样一组回答：
 
 $$
-\{y_i\}_{i=1}^{G}\sim\pi_{\theta_{\text{old}}}(\cdot|x)
+\{y_i\}_{i=1}^{G}\sim\pi_{\theta_{\text{old}}}(\cdot\mid x)
 $$
 
 组内 advantage：
@@ -69,13 +69,13 @@ s_i(\theta)\hat{A}_i,
 \right]
 $$
 
-其中 `s_i(θ)` 是 length-normalized sequence-level importance ratio：
+其中 $s_i(\theta)$ 是 length-normalized sequence-level importance ratio：
 
 $$
 s_i(\theta)=
 \left(
-\frac{\pi_\theta(y_i|x)}
-{\pi_{\theta_{\text{old}}}(y_i|x)}
+\frac{\pi_\theta(y_i\mid x)}
+{\pi_{\theta_{\text{old}}}(y_i\mid x)}
 \right)^{\frac{1}{|y_i|}}
 $$
 
@@ -87,8 +87,8 @@ s_i(\theta)=
 \frac{1}{|y_i|}
 \sum_{t=1}^{|y_i|}
 \log
-\frac{\pi_\theta(y_{i,t}|x,y_{i,<t})}
-{\pi_{\theta_{\text{old}}}(y_{i,t}|x,y_{i,<t})}
+\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}
+{\pi_{\theta_{\text{old}}}(y_{i,t}\mid x,y_{i,<t})}
 \right)
 $$
 
@@ -113,14 +113,14 @@ flowchart TD
 如果直接用整条序列概率比：
 
 $$
-\frac{\pi_\theta(y|x)}{\pi_{\theta_{\text{old}}}(y|x)}
+\frac{\pi_\theta(y\mid x)}{\pi_{\theta_{\text{old}}}(y\mid x)}
 =
 \prod_{t=1}^{|y|}
-\frac{\pi_\theta(y_t|x,y_{<t})}
-{\pi_{\theta_{\text{old}}}(y_t|x,y_{<t})}
+\frac{\pi_\theta(y_t\mid x,y_{<t})}
+{\pi_{\theta_{\text{old}}}(y_t\mid x,y_{<t})}
 $$
 
-长序列会导致乘积极大或极小，数值范围不稳定。取 `1/|y|` 次方，相当于使用每 token 平均 log-ratio：
+长序列会导致乘积极大或极小，数值范围不稳定。取 $\frac{1}{|y|}$ 次方，相当于使用每 token 平均 log-ratio：
 
 $$
 \log s_i(\theta)=
@@ -184,7 +184,7 @@ flowchart LR
 |---|---|---|
 | 主要动机 | 改善 GRPO 在长 CoT 的采样、裁剪、长度问题 | 解决 token-level ratio 与 sequence reward 粒度不匹配 |
 | 采样 | dynamic sampling 保证组内差异 | 仍是 group sampling，重点不在重采样 |
-| clipping | decoupled clip，`ε_high > ε_low` | sequence-level clip |
+| clipping | decoupled clip，$\varepsilon_{\text{high}} > \varepsilon_{\text{low}}$ | sequence-level clip |
 | loss 粒度 | token-level PG loss | sequence-level objective |
 | 长度处理 | overlong reward shaping | ratio length normalization |
 | 典型卖点 | 训练信号密度、探索、长度稳定 | MoE 稳定、基础设施友好、粒度一致 |
@@ -211,7 +211,7 @@ GSPO 特别适合：
 
 - sequence reward。
 - group advantage 分布。
-- sequence ratio `s_i` 分布。
+- sequence ratio $s_i$ 分布。
 - clip fraction。
 - response length。
 - KL to reference。
@@ -226,7 +226,7 @@ GSPO 特别适合：
 1. **GSPO 为什么叫 Sequence Policy Optimization？**  
    因为它把 importance ratio、clipping 和优化目标放在 sequence 粒度，而不是 token 粒度。
 
-2. **GSPO 的 `s_i` 是什么？**  
+2. **GSPO 的 $s_i$ 是什么？**  
    它是新旧策略对整条回答概率比的长度归一化形式，也就是 token log-ratio 的平均后再取指数。
 
 3. **为什么 GSPO 更适合 sequence-level reward？**  

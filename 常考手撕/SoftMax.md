@@ -34,18 +34,23 @@ import numpy as np
 
 
 def fmt(x: float) -> str:
+    # 避免浮点误差打印成 -0.000000。
     if abs(x) < 5e-7:
         x = 0.0
     return f"{x:.6f}"
 
 
 def softmax(x, axis):
+    # 先减最大值做数值稳定处理：
+    # softmax(x) == softmax(x - max(x))，但后者不会 exp 溢出。
     z = x - np.max(x, axis=axis, keepdims=True)
     exp_z = np.exp(z)
+    # keepdims=True 保留被归一化的维度，确保广播除法按行/列进行。
     return exp_z / np.sum(exp_z, axis=axis, keepdims=True)
 
 
 def solve():
+    # 输入 n*m 矩阵，并指定沿行(axis=1)或列(axis=0)做 softmax。
     data = sys.stdin.read().strip().split()
     if not data:
         return
@@ -53,6 +58,7 @@ def solve():
     n, m, axis = map(int, data[:3])
     vals = np.array(list(map(float, data[3:])), dtype=float)
     x = vals.reshape(n, m)
+    # y 的形状仍是 [n,m]，指定 axis 上的概率和为 1。
     y = softmax(x, axis)
 
     for row in y:

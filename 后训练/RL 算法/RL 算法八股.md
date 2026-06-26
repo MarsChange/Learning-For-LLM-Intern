@@ -1,5 +1,139 @@
 # RL 算法八股
 
+## 0. 常见算法对比八股速查
+
+这一部分优先回答“面试官让你比较两个算法”时最常见的问题。先抓住四个维度：**是否在线采样、是否需要 reward model、是否需要 critic、奖励/更新粒度是否匹配**。
+
+### 0.1 PPO、DPO、GRPO、DAPO、Dr.GRPO、GSPO 总览
+
+| 算法      | 核心思想                                           | 是否在线采样 | reward 来源                | 是否需要 critic | 主要优势                           | 主要代价               |
+| ------- | ---------------------------------------------- | -----: | ------------------------ | ----------: | ------------------------------ | ------------------ |
+| PPO     | 用新旧策略概率比裁剪限制更新幅度                               |      是 | RM、规则、环境奖励               |           是 | 通用、可优化任意 reward、能在线探索          | 多模型组件、显存高、超参敏感     |
+| DPO     | 用偏好对直接优化 policy/reference log-ratio margin     |      否 | chosen/rejected 偏好对      |           否 | 简单稳定、成本低、像 SFT 一样训练            | 依赖离线偏好数据，探索弱       |
+| GRPO    | 用同 prompt 多回答的组内相对 reward 替代 critic            |      是 | 规则奖励或 RM                 |           否 | 省 critic，适合数学/代码 RLVR          | 依赖 group 内差异，采样成本高 |
+| DAPO    | 在 GRPO 上加入动态采样、非对称 clip、长度控制                   |      是 | 多为规则奖励                   |           否 | 更适合长 CoT 推理训练                  | 工程复杂，重采样增加成本       |
+| Dr.GRPO | 修正 GRPO 的长度归一和 std 归一偏置                        |      是 | 多为规则奖励                   |           否 | 降低错误回答变长和难度偏置                  | 解决的是目标偏置，不解决所有采样问题 |
+| GSPO    | 把 token-level ratio/clipping 改成 sequence-level |      是 | 多为 sequence-level reward |           否 | reward 粒度和 update 粒度更一致，MoE 更稳 | 算法较新，实现和适用边界要看任务   |
+
+> **速记：** PPO 是经典在线 RLHF；DPO 是离线偏好优化；GRPO 是省 critic 的在线 RLVR；DAPO/Dr.GRPO/GSPO 都是在修 GRPO 在长推理里的不同问题。
+
+### 0.2 GRPO 相比 PPO 有什么优缺点？
+
+**答案：** GRPO 可以看作 PPO 在 LLM reasoning 场景下的轻量化变体。PPO 用 critic/value model 估计 advantage，而 GRPO 对同一个 prompt 采样多条回答，用组内平均 reward 作为 baseline，从而去掉 critic。  
+
+| 维度 | PPO | GRPO |
+|---|---|---|
+| advantage 估计 | 训练 critic 估计 $V(s_t)$ | 组内相对 reward |
+| 模型组件 | policy、old policy、reference、RM、critic | policy、old policy、reference、reward/verifier |
+| 显存和工程成本 | 高 | 较低 |
+| 采样方式 | prompt batch 生成 rollout | 每个 prompt 采样 $G$ 条回答 |
+| 适合任务 | 开放式偏好、环境反馈、多步任务 | 数学、代码、格式验证等 RLVR |
+| 主要风险 | critic 不稳、RM hacking、KL/clip 超参敏感 | 全对/全错 group 信号弱，依赖 group size 和 reward 质量 |
+
+**GRPO 的优点：**
+
+- 去掉 critic，显存、实现和训练稳定性压力更小。
+- 对可验证任务很自然，同一题多条回答可以形成相对比较。
+- 不一定需要人工偏好 RM，规则/verifier 就能给 reward。
+
+**GRPO 的缺点：**
+
+- 每个 prompt 要采多条回答，rollout token 成本不低。
+- 如果 group 全对或全错，advantage 信号很弱。
+- sequence-level reward 配 token-level ratio，长 CoT 或 MoE 场景可能有噪声。
+
+> **面试表达：** GRPO 不是“比 PPO 全面更强”，而是在可验证推理任务里用组内比较替代 critic，换来更低显存和更简单训练；代价是更依赖采样组质量和 verifier 信号。
+
+**相关：** [[后训练/RL 算法/PPO/PPO 算法原理|PPO 算法原理]]、[[后训练/RL 算法/GRPO/GRPO 算法原理|GRPO 算法原理]]、[[后训练/RL 基础/Reward Return Value Advantage|Reward Return Value Advantage]]
+
+---
+
+### 0.3 GRPO 相比 DPO 有什么优缺点？
+
+**答案：** GRPO 和 DPO 的核心差异是：GRPO 是在线采样的强化学习，DPO 是离线偏好对优化。GRPO 可以让模型在当前策略下探索新解法，并用规则/verifier 奖励更新；DPO 则直接利用已有 chosen/rejected 数据，不做 rollout。
+
+| 维度 | DPO | GRPO |
+|---|---|---|
+| 数据来源 | 静态偏好对 | 当前策略在线生成 |
+| 训练信号 | chosen 相对 rejected 更好 | 同 prompt 组内 reward 高低 |
+| reward model | 不需要显式 RM | 可用规则奖励或 RM |
+| critic | 不需要 | 不需要 |
+| 探索能力 | 弱，受离线数据覆盖限制 | 较强，可持续采样新回答 |
+| 工程成本 | 低，接近 SFT | 中等，需要 rollout/verifier/old logprob |
+| 典型任务 | 通用偏好对齐、风格/安全/有用性偏好 | 数学、代码、工具调用、可验证推理 |
+
+**GRPO 的优势：**
+
+- 能优化规则奖励，不依赖人工偏好对。
+- 能通过在线采样发现新的推理路径。
+- 更适合“答案可自动判定”的 reasoning RL。
+
+**GRPO 的劣势：**
+
+- 比 DPO 更贵，需要生成多条 response 并计算 reward/logprob。
+- reward 规则一旦有漏洞，容易 reward hacking。
+- 训练稳定性受 KL、clip、group size、采样温度影响。
+
+> **面试表达：** DPO 是“给定偏好数据后怎么学”，GRPO 是“让模型自己采样、再用 verifier 反馈怎么学”。有高质量偏好对时 DPO 更省；有可验证奖励和探索需求时 GRPO 更合适。
+
+**相关：** [[后训练/RL 算法/DPO/DPO 算法原理|DPO 算法原理]]、[[后训练/RL 算法/GRPO/GRPO 算法原理|GRPO 算法原理]]、[[后训练/RL 基础/Rollout 和采样|Rollout 和采样]]
+
+---
+
+### 0.4 PPO 相比 DPO 有什么优缺点？
+
+**答案：** PPO 是经典 RLHF 的在线 RL 算法，DPO 是把偏好建模和策略优化合并后的离线偏好优化算法。PPO 更通用，但工程更重；DPO 更简单稳定，但探索能力弱。
+
+| 维度 | PPO | DPO |
+|---|---|---|
+| 优化方式 | 在线 rollout + reward 最大化 | 离线 chosen/rejected 分类式优化 |
+| reward model | 通常需要单独训练 RM | 不需要显式 RM |
+| critic/value | 需要 | 不需要 |
+| reference model | 用 KL 约束 | 用 log-ratio margin 体现 reference |
+| 能否探索 | 可以，取决于采样策略 | 基本不能，只学习数据里已有偏好 |
+| 工程复杂度 | 高 | 低 |
+| 失败模式 | reward hacking、KL 爆炸、critic 不稳 | 偏好数据噪声、风格过拟合、覆盖不足 |
+
+> **面试表达：** PPO 更像完整 RL 系统，能优化任意 reward；DPO 更像偏好监督学习，工程简单但依赖数据覆盖。不是谁替代谁，而是目标和资源不同。
+
+**相关：** [[后训练/RL 算法/PPO/PPO 算法原理|PPO 算法原理]]、[[后训练/RL 算法/DPO/DPO 算法原理|DPO 算法原理]]、[[后训练/RL 基础/RLHF 总览|RLHF 总览]]
+
+---
+
+### 0.5 GRPO、DAPO、Dr.GRPO、GSPO 怎么区分？
+
+**答案：** 这几类都围绕 GRPO 及其长推理训练问题展开，但改的不是同一个点。GRPO 是基线；DAPO 主要改采样和 clip；Dr.GRPO 主要改目标里的归一化偏置；GSPO 主要改概率比和裁剪粒度。
+
+| 算法      | 要解决的问题                                   | 关键改动                                                           | 面试抓手           |
+| ------- | ---------------------------------------- | -------------------------------------------------------------- | -------------- |
+| GRPO    | PPO critic 成本高                           | 组内相对 reward 替代 value baseline                                  | 省 critic       |
+| DAPO    | 长 CoT 中有效样本少、好样本被 clip、回答过长              | dynamic sampling、Clip-Higher、token-level loss、overlong shaping | 提高信号密度和长推理稳定性  |
+| Dr.GRPO | 长度归一化和 std 归一化带来偏置                       | 去掉 per-response length normalization 和 group std normalization | 修正目标偏置         |
+| GSPO    | sequence reward 搭配 token-level ratio 不匹配 | sequence-level length-normalized ratio 和 clipping              | 粒度对齐，MoE/长序列更稳 |
+
+> **面试表达：** DAPO 偏工程训练策略，Dr.GRPO 偏目标函数无偏性，GSPO 偏 update 粒度一致性；它们不是简单替代关系，而是分别修 GRPO 的不同短板。
+
+**相关：** [[后训练/RL 算法/GRPO/GRPO 算法原理|GRPO 算法原理]]、[[后训练/RL 算法/DAPO/DAPO 算法原理|DAPO 算法原理]]、[[后训练/RL 算法/Dr.GRPO/Dr.GRPO 算法原理|Dr.GRPO 算法原理]]、[[后训练/RL 算法/GSPO/GSPO 算法原理|GSPO 算法原理]]
+
+---
+
+### 0.6 面试里如何做算法选型？
+
+**答案：** 先判断任务有没有高质量偏好对、有没有自动 verifier、是否需要在线探索、回答是否很长、模型是否 MoE 或训练/推理分离。选型可以按下面路线说：
+
+| 场景 | 更优先考虑 | 理由 |
+|---|---|---|
+| 有大量高质量 chosen/rejected 偏好对 | DPO | 成本低、稳定、复现简单 |
+| 开放式助手偏好，需要 RM 打分和在线探索 | PPO | 经典 RLHF 管线，reward 形式更通用 |
+| 数学/代码/格式等可自动验证任务 | GRPO | 不需要 critic，规则 reward 直接可用 |
+| 长 CoT reasoning，group 经常全对/全错 | DAPO | 动态采样提高有效训练信号 |
+| 发现错误回答越训越长或 std 偏置明显 | Dr.GRPO | 修正长度归一和 group std 归一偏置 |
+| MoE 或长序列下 token-level ratio 噪声大 | GSPO | sequence-level ratio 与 sequence reward 更匹配 |
+
+> **面试表达：** 先看数据和奖励：偏好对充足选 DPO；可验证奖励选 GRPO；需要通用在线 RL 选 PPO。再看训练病灶：有效样本少看 DAPO，长度/std 偏置看 Dr.GRPO，token-level ratio 不稳看 GSPO。
+
+---
+
 ## 1. RLHF 的三个主要阶段是什么？
 
 **答案：** 经典 RLHF 包括三步：先做 SFT，让模型学会基本指令跟随和回答格式；再用 chosen/rejected 偏好对训练 reward model；最后用 PPO 等 RL 算法优化 policy，让模型在 reward model 和 KL 约束下生成更符合偏好的回答。现代变体中，DPO 省掉显式 reward model 和在线 RL，GRPO/DAPO 常用规则奖励替代 reward model。  
@@ -87,3 +221,12 @@
 > **面试表达：** GRPO 代码的核心数据结构是一批 group，每个 group 里有多条 response、reward、old logprob、ref logprob 和 mask。  
 
 **相关：** [[后训练/RL 算法/GRPO/GRPO 算法原理|GRPO 算法原理]]、[[后训练/RL 基础/Rollout 和采样|Rollout 和采样]]、[[后训练/RL 基础/Reward Return Value Advantage|Reward Return Value Advantage]]
+
+---
+
+## 11. PPO 里的 reward model 和 critic/value model 分别是怎么得到的？
+
+**答案：** reward model 通常在 PPO 之前用人类偏好对单独训练：先用 SFT model 对同一个 prompt 采样多个回答，再标注 chosen/rejected，用 pairwise ranking loss 让 RM 学会给更优回答更高分。PPO 阶段 RM 一般冻结，只负责给完整 response 打 reward。critic/value model 则通常在 PPO 阶段训练：从 SFT/policy backbone 初始化，加 value head，用 rollout 得到的 return 作为监督信号拟合 $V(s_t)$，再用它计算 advantage、降低 policy gradient 方差。  
+> **面试表达：** RM 是 PPO 前训练好的偏好打分器，critic 是 PPO 中训练出来的状态价值估计器；RM 评价完整回答，critic 估计当前前缀的平均回报基线。  
+
+**相关：** [[后训练/RL 算法/PPO/PPO 算法原理|PPO 算法原理]]、[[后训练/RL 基础/RLHF 总览|RLHF 总览]]、[[后训练/RL 基础/Reward Return Value Advantage|Reward Return Value Advantage]]

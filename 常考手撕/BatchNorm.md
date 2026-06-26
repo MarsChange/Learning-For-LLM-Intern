@@ -46,21 +46,27 @@ import numpy as np
 
 
 def fmt(x: float) -> str:
+    # 输出格式对齐判题要求；把极小浮点误差视为 0。
     if abs(x) < 5e-7:
         x = 0.0
     return f"{x:.6f}"
 
 
 def batch_norm(x, eps, gamma=None, beta=None):
+    # x: [n, d]。BatchNorm 对 batch 维度做统计：
+    # 每个 feature j 用 n 个样本上的均值/方差。
     mean = np.mean(x, axis=0, keepdims=True)
     var = np.mean((x - mean) ** 2, axis=0, keepdims=True)
+    # 标准化时 mean/var 形状是 [1,d]，会广播到 [n,d]。
     y = (x - mean) / np.sqrt(var + eps)
     if gamma is not None and beta is not None:
+        # gamma/beta 是每个 feature 一套参数，shape [d]。
         y = y * gamma + beta
     return y
 
 
 def solve():
+    # 解析输入：n 个样本，每个样本 d 个 feature。
     data = sys.stdin.read().strip().split()
     if not data:
         return
@@ -71,15 +77,18 @@ def solve():
     affine = int(data[3])
     idx = 4
 
+    # 读取输入矩阵 X。
     x = np.array(list(map(float, data[idx:idx + n * d])), dtype=float).reshape(n, d)
     idx += n * d
 
     gamma = beta = None
     if affine:
+        # 如果使用仿射变换，则继续读取 gamma 和 beta。
         gamma = np.array(list(map(float, data[idx:idx + d])), dtype=float)
         idx += d
         beta = np.array(list(map(float, data[idx:idx + d])), dtype=float)
 
+    # 这里实现的是训练阶段 BatchNorm：直接用当前 batch 统计量。
     y = batch_norm(x, eps, gamma, beta)
     for row in y:
         print(" ".join(fmt(v) for v in row))

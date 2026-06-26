@@ -62,7 +62,7 @@ $$
 -\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l))
 $$
 
-其中 `y_w` 是 chosen，`y_l` 是 rejected。
+其中 $y_w$ 是 chosen，$y_l$ 是 rejected。
 
 ## PPO、DPO、GRPO 的位置
 

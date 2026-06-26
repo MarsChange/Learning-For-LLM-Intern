@@ -12,10 +12,10 @@
 
 | 概念 | 符号 | 含义 |
 |---|---|---|
-| Reward | `r_t` | 当前时间步获得的奖励 |
-| Return | `G_t` | 从当前时刻开始的累计折扣奖励 |
-| Value | `V(s_t)` | 状态 `s_t` 下预期 return |
-| Advantage | `A(s_t,a_t)` | 动作 `a_t` 比平均策略好多少 |
+| Reward | $r_t$ | 当前时间步获得的奖励 |
+| Return | $G_t$ | 从当前时刻开始的累计折扣奖励 |
+| Value | $V(s_t)$ | 状态 $s_t$ 下预期 return |
+| Advantage | $A(s_t,a_t)$ | 动作 $a_t$ 比平均策略好多少 |
 
 ## Return
 
@@ -25,7 +25,7 @@ $$
 G_t=\sum_{k=0}^{\infty}\gamma^k r_{t+k}
 $$
 
-其中 `γ` 是 discount factor。
+其中 $\gamma$ 是 discount factor。
 
 LLM 后训练里常见情况：
 
@@ -38,7 +38,7 @@ LLM 后训练里常见情况：
 状态价值：
 
 $$
-V^\pi(s)=\mathbb{E}_{\pi}[G_t|s_t=s]
+V^\pi(s)=\mathbb{E}_{\pi}[G_t\mid s_t=s]
 $$
 
 直觉：在这个状态下，按当前策略继续生成，平均能拿多少回报。
@@ -50,7 +50,7 @@ PPO 里 critic/value model 的作用就是估计 `V(s)`，降低 policy gradient
 动作价值：
 
 $$
-Q^\pi(s,a)=\mathbb{E}_{\pi}[G_t|s_t=s,a_t=a]
+Q^\pi(s,a)=\mathbb{E}_{\pi}[G_t\mid s_t=s,a_t=a]
 $$
 
 Advantage：
@@ -61,8 +61,8 @@ $$
 
 直觉：
 
-- `A > 0`：这个动作比平均水平好，应该提高概率。
-- `A < 0`：这个动作比平均水平差，应该降低概率。
+- $A > 0$：这个动作比平均水平好，应该提高概率。
+- $A < 0$：这个动作比平均水平差，应该降低概率。
 
 ## LLM 中的对应关系
 
@@ -87,10 +87,10 @@ $$
 A_t^{GAE}=\sum_{l=0}^{\infty}(\gamma\lambda)^l\delta_{t+l}
 $$
 
-`λ` 控制 bias-variance tradeoff：
+$\lambda$ 控制 bias-variance tradeoff：
 
-- `λ` 大：更接近 Monte Carlo return，方差大、偏差小。
-- `λ` 小：更依赖 value bootstrap，方差小、偏差大。
+- $\lambda$ 大：更接近 Monte Carlo return，方差大、偏差小。
+- $\lambda$ 小：更依赖 value bootstrap，方差小、偏差大。
 
 ## GRPO 如何不用 Value
 
