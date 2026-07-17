@@ -1,4 +1,4 @@
-# 手撕 Multi-Head Attention（PyTorch）
+# 手撕 Multi-Head Attention（PyTorch + NumPy）
 
 ## 面试定位
 
@@ -10,7 +10,7 @@ MHA 常考的是 shape 变换和 mask：
 - 拼回 `d_model`
 - 过输出投影 `W_O`
 
-这里给 ACM 模式代码：从标准输入读矩阵，输出 attention 结果。实现允许使用 PyTorch。
+这里给两份 ACM 模式代码：从标准输入读矩阵，输出 attention 结果。PyTorch 和 NumPy 版本使用完全相同的输入输出格式。
 
 ## 输入输出格式
 
@@ -44,7 +44,7 @@ B T D
 
 保留 6 位小数。
 
-## 可运行代码
+## PyTorch 版本
 
 ```python
 import sys
@@ -140,6 +140,102 @@ if __name__ == "__main__":
     solve()
 ```
 
+## NumPy 版本
+
+与 PyTorch 版本的计算过程和输入输出格式完全一致。主要区别是用 `reshape + transpose` 完成多头维度变换，并手动实现数值稳定的 softmax。
+
+```python
+import sys
+import math
+import numpy as np
+
+
+def fmt(x: float) -> str:
+    # 输出统一保留 6 位小数；极小误差当成 0，避免 -0.000000。
+    if abs(x) < 5e-7:
+        x = 0.0
+    return f"{x:.6f}"
+
+
+def softmax(x):
+    # 在最后一维做 softmax。先减最大值，避免 exp 上溢。
+    x = x - np.max(x, axis=-1, keepdims=True)
+    exp_x = np.exp(x)
+    return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+
+
+def multi_head_attention(x, w_q, w_k, w_v, w_o, num_heads, causal):
+    # x: [B, T, D]，B=batch size，T=序列长度，D=模型 hidden size。
+    bsz, seq_len, d_model = x.shape
+    if d_model % num_heads != 0:
+        raise ValueError("d_model must be divisible by num_heads")
+
+    head_dim = d_model // num_heads
+
+    # Q/K/V: [B, T, D]。
+    q = x @ w_q
+    k = x @ w_k
+    v = x @ w_v
+
+    # 拆 head：[B, T, D] -> [B, T, H, head_dim] -> [B, H, T, head_dim]。
+    q = q.reshape(bsz, seq_len, num_heads, head_dim).transpose(0, 2, 1, 3)
+    k = k.reshape(bsz, seq_len, num_heads, head_dim).transpose(0, 2, 1, 3)
+    v = v.reshape(bsz, seq_len, num_heads, head_dim).transpose(0, 2, 1, 3)
+
+    # scores: [B, H, T, T]。
+    scores = (q @ k.swapaxes(-2, -1)) / math.sqrt(head_dim)
+    if causal:
+        # 上三角（不含对角线）为 True，广播到 [B, H, T, T] 后屏蔽未来位置。
+        mask = np.triu(np.ones((seq_len, seq_len), dtype=bool), k=1)
+        scores = np.where(mask[None, None, :, :], -np.inf, scores)
+
+    # 每个 query 在所有 key 上归一化。
+    attn = softmax(scores)
+    # [B, H, T, T] @ [B, H, T, head_dim] -> [B, H, T, head_dim]。
+    out = attn @ v
+    # 合并 heads：[B, H, T, head_dim] -> [B, T, H, head_dim] -> [B, T, D]。
+    out = out.transpose(0, 2, 1, 3).reshape(bsz, seq_len, d_model)
+    return out @ w_o
+
+
+def take(vals, idx, cnt):
+    # 从 vals[idx:] 取 cnt 个数，返回片段和新的 idx。
+    return vals[idx:idx + cnt], idx + cnt
+
+
+def solve():
+    data = sys.stdin.read().strip().split()
+    if not data:
+        return
+
+    bsz, seq_len, d_model, num_heads, causal = map(int, data[:5])
+    vals = np.asarray(list(map(float, data[5:])), dtype=np.float64)
+    idx = 0
+
+    x_vals, idx = take(vals, idx, bsz * seq_len * d_model)
+    wq_vals, idx = take(vals, idx, d_model * d_model)
+    wk_vals, idx = take(vals, idx, d_model * d_model)
+    wv_vals, idx = take(vals, idx, d_model * d_model)
+    wo_vals, idx = take(vals, idx, d_model * d_model)
+
+    x = x_vals.reshape(bsz, seq_len, d_model)
+    w_q = wq_vals.reshape(d_model, d_model)
+    w_k = wk_vals.reshape(d_model, d_model)
+    w_v = wv_vals.reshape(d_model, d_model)
+    w_o = wo_vals.reshape(d_model, d_model)
+
+    out = multi_head_attention(
+        x, w_q, w_k, w_v, w_o, num_heads, bool(causal)
+    )
+    print(bsz, seq_len, d_model)
+    for row in out.reshape(bsz * seq_len, d_model):
+        print(" ".join(fmt(v) for v in row))
+
+
+if __name__ == "__main__":
+    solve()
+```
+
 ## 测试用例
 
 ### 用例 1
@@ -208,5 +304,6 @@ if __name__ == "__main__":
 
 - `view` 前后要理解维度：`[B,T,D] -> [B,H,T,head_dim]`。
 - `transpose` 后最好接 `contiguous()` 再 `view`。
+- NumPy 没有 `contiguous()` 要求，`transpose` 后可直接用 `reshape` 合并 heads。
 - causal mask 要 mask 未来位置，也就是上三角不含对角线。
 - softmax 维度是最后一维，即每个 query 对所有 key 的分布。

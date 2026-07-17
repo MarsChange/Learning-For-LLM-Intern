@@ -132,16 +132,114 @@ $$
 DAPO 强调 token-level loss，按有效 token 归一：
 
 $$
-\frac{1}{\sum_i |o_i|}\sum_i\sum_t(\cdots)
+\mathcal{J}_{\text{token}}(\theta)=
+\mathbb{E}\left[
+\frac{1}{\sum_{i=1}^{G}|o_i|}
+\sum_{i=1}^{G}\sum_{t=1}^{|o_i|}
+\min\left(
+\rho_{i,t}(\theta)\hat{A}_i,
+\operatorname{clip}\left(
+\rho_{i,t}(\theta),
+1-\varepsilon_{\text{low}},
+1+\varepsilon_{\text{high}}
+\right)\hat{A}_i
+\right)
+\right]
 $$
 
+其中：
+
+$$
+\rho_{i,t}(\theta)=
+\frac{\pi_\theta(o_{i,t}\mid q,o_{i,<t})}
+{\pi_{\theta_{\text{old}}}(o_{i,t}\mid q,o_{i,<t})}
+$$
+
+$$
+\hat{A}_i=
+\frac{R_i-\operatorname{mean}(R_1,\ldots,R_G)}
+{\operatorname{std}(R_1,\ldots,R_G)}
+$$
+
+这里 $R_i$ 是第 $i$ 条完整回答的 sequence-level reward，通常已经包含 correctness reward 和 overlong reward shaping。因为奖励是整条回答级别的，所以实际实现里常把同一个 $\hat{A}_i$ 广播给该回答的所有有效 token：
+
+$$
+\hat{A}_{i,t}=\hat{A}_i,\quad t=1,\ldots,|o_i|
+$$
+
+如果写成训练时最小化的 loss，只需要取负号：
+
+$$
+\mathcal{L}_{\text{token}}(\theta)=
+-\mathcal{J}_{\text{token}}(\theta)
+$$
+
+更工程化一点，如果 batch 里有 padding 或 response mask，可写成：
+
+$$
+\mathcal{L}_{\text{token}}(\theta)=
+-
+\frac{1}{\sum_{i=1}^{G}\sum_{t}m_{i,t}}
+\sum_{i=1}^{G}\sum_t
+m_{i,t}
+\min\left(
+\rho_{i,t}(\theta)\hat{A}_i,
+\operatorname{clip}\left(
+\rho_{i,t}(\theta),
+1-\varepsilon_{\text{low}},
+1+\varepsilon_{\text{high}}
+\right)\hat{A}_i
+\right)
+$$
+
+其中 $m_{i,t}=1$ 表示第 $i$ 条回答的第 $t$ 个 token 是有效 response token，$m_{i,t}=0$ 表示 padding、prompt 或不参与 loss 的位置。
+
 和简单 sequence 平均相比，这样对长短回答的梯度贡献更可控，特别适合长 CoT。
+
+对比一下常见的 sequence 平均写法：
+
+$$
+g_{i,t}(\theta)=
+\min\left(
+\rho_{i,t}(\theta)\hat{A}_i,
+\operatorname{clip}\left(
+\rho_{i,t}(\theta),
+1-\varepsilon_{\text{low}},
+1+\varepsilon_{\text{high}}
+\right)\hat{A}_i
+\right)
+$$
+
+如果先对每条 response 内部平均，再对 group 内 response 平均，目标会写成：
+
+$$
+\mathcal{J}_{\text{seq-avg}}(\theta)=
+\mathbb{E}\left[
+\frac{1}{G}\sum_{i=1}^{G}
+\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}
+g_{i,t}(\theta)
+\right]
+$$
+
+这种写法会先让每条回答内部做平均，再让每条回答在 batch 中占相同权重。DAPO 的 token-level 归一是直接按所有有效 token 汇总：
+
+$$
+\mathcal{J}_{\text{token}}(\theta)=
+\mathbb{E}\left[
+\frac{1}{\sum_{i=1}^{G}|o_i|}
+\sum_{i=1}^{G}\sum_{t=1}^{|o_i|}
+g_{i,t}(\theta)
+\right]
+$$
+
+因此一条长 CoT 的 token 不会因为“先除以本条长度”而被额外稀释；同时整个 batch 的梯度尺度又由总有效 token 数控制。
 
 要点：
 
 - reward 仍可来自 sequence-level correctness。
-- advantage 可广播到 token。
+- advantage 通常是 sequence-level group-relative advantage，然后广播到该回答的每个有效 token。
 - loss 聚合按 token 归一，降低 response 长度差异带来的偏置。
+- 如果实现里存在 padding、prompt mask、answer mask，要用 $m_{i,t}$ 只统计真正参与优化的 response token。
 
 ### 4. Overlong Reward Shaping
 
